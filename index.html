@@ -1,54 +1,83 @@
 <!doctype html>
-</tr>
-</thead>
-<tbody>
-<!-- Five droppable rows -->
-<tr>
-<td class="dropzone" data-col="A"></td>
-<td class="dropzone" data-col="B"></td>
-</tr>
-<tr>
-<td class="dropzone" data-col="A"></td>
-<td class="dropzone" data-col="B"></td>
-</tr>
-<tr>
-<td class="dropzone" data-col="A"></td>
-<td class="dropzone" data-col="B"></td>
-</tr>
-<tr>
-<td class="dropzone" data-col="A"></td>
-<td class="dropzone" data-col="B"></td>
-</tr>
-<tr>
-<td class="dropzone" data-col="A"></td>
-<td class="dropzone" data-col="B"></td>
-</tr>
-</tbody>
-</table>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Match the Pronunciation</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Match the pronunciation</h1>
+    <div class="status">
+      <div class="timer" id="timer" aria-live="polite">00:00.0</div>
+      <div class="score" id="score" aria-live="polite"></div>
+    </div>
+  </header>
 
+  <main class="layout">
+    <section class="board" aria-label="Answer board">
+      <table class="game-table" role="grid" aria-label="Pronunciation table">
+        <thead>
+          <tr>
+            <th id="colAHeader">
+              <div class="title-wrap">
+                <span class="title-text" id="titleAText">Title A</span>
+                <button class="speaker" id="speakTitleA" title="Hear column A title" aria-label="Hear column A title">🔊</button>
+              </div>
+            </th>
+            <th id="colBHeader">
+              <div class="title-wrap">
+                <span class="title-text" id="titleBText">Title B</span>
+                <button class="speaker" id="speakTitleB" title="Hear column B title" aria-label="Hear column B title">🔊</button>
+              </div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="dropzone" data-col="A"></td>
+            <td class="dropzone" data-col="B"></td>
+          </tr>
+          <tr>
+            <td class="dropzone" data-col="A"></td>
+            <td class="dropzone" data-col="B"></td>
+          </tr>
+          <tr>
+            <td class="dropzone" data-col="A"></td>
+            <td class="dropzone" data-col="B"></td>
+          </tr>
+          <tr>
+            <td class="dropzone" data-col="A"></td>
+            <td class="dropzone" data-col="B"></td>
+          </tr>
+          <tr>
+            <td class="dropzone" data-col="A"></td>
+            <td class="dropzone" data-col="B"></td>
+          </tr>
+        </tbody>
+      </table>
 
-<div class="controls">
-<button id="submitBtn" class="primary" disabled>Submit</button>
-<button id="hearBtn" class="secondary" disabled>Hear the words</button>
-</div>
-<p class="hint">Tip: Refresh the page to reset and reshuffle.</p>
-</section>
+      <div class="controls">
+        <button id="submitBtn" class="primary" disabled>Submit</button>
+        <button id="hearBtn" class="secondary" disabled>Hear the words</button>
+      </div>
+      <p class="hint">Tip: Refresh the page to reset and reshuffle.</p>
+    </section>
 
+    <aside class="tray" aria-label="Word tray">
+      <h2>Drag these words ➜</h2>
+      <div id="tray" class="tile-tray" aria-live="polite"></div>
+    </aside>
+  </main>
 
-<aside class="tray" aria-label="Word tray">
-<h2>Drag these words ➜</h2>
-<div id="tray" class="tile-tray" aria-live="polite"></div>
-</aside>
-</main>
+  <footer class="foot">
+    <small>
+      Dataset: <code id="datasetName">dataset01</code> • Share a link like
+      <code>?dataset=dataset01</code>, <code>?dataset=dataset02</code>, etc.
+    </small>
+  </footer>
 
-
-<footer class="foot">
-<small>
-Dataset: <code id="datasetName">dataset01</code> • Share a link like <code>?dataset=dataset01</code>, <code>?dataset=dataset02</code>, etc.
-</small>
-</footer>
-
-
-<script src="script.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
