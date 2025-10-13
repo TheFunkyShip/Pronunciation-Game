@@ -1,0 +1,54 @@
+<!doctype html>
+</tr>
+</thead>
+<tbody>
+<!-- Five droppable rows -->
+<tr>
+<td class="dropzone" data-col="A"></td>
+<td class="dropzone" data-col="B"></td>
+</tr>
+<tr>
+<td class="dropzone" data-col="A"></td>
+<td class="dropzone" data-col="B"></td>
+</tr>
+<tr>
+<td class="dropzone" data-col="A"></td>
+<td class="dropzone" data-col="B"></td>
+</tr>
+<tr>
+<td class="dropzone" data-col="A"></td>
+<td class="dropzone" data-col="B"></td>
+</tr>
+<tr>
+<td class="dropzone" data-col="A"></td>
+<td class="dropzone" data-col="B"></td>
+</tr>
+</tbody>
+</table>
+
+
+<div class="controls">
+<button id="submitBtn" class="primary" disabled>Submit</button>
+<button id="hearBtn" class="secondary" disabled>Hear the words</button>
+</div>
+<p class="hint">Tip: Refresh the page to reset and reshuffle.</p>
+</section>
+
+
+<aside class="tray" aria-label="Word tray">
+<h2>Drag these words ➜</h2>
+<div id="tray" class="tile-tray" aria-live="polite"></div>
+</aside>
+</main>
+
+
+<footer class="foot">
+<small>
+Dataset: <code id="datasetName">dataset01</code> • Share a link like <code>?dataset=dataset01</code>, <code>?dataset=dataset02</code>, etc.
+</small>
+</footer>
+
+
+<script src="script.js"></script>
+</body>
+</html>
