@@ -1,5 +1,4 @@
 :root{
-body{
 margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, Segoe UI, Roboto, sans-serif;
 }
 .topbar{

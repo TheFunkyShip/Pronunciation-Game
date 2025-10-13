@@ -1,5 +1,4 @@
 // Pronunciation Game - main logic
-hearBtn.addEventListener('click', async ()=>{
 if(hearBtn.disabled) return;
 hearBtn.disabled = true; // prevent re-entry during playback
 const seq = [];
