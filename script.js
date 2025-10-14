@@ -1,22 +1,20 @@
 /* =========================================
    Pronunciation Game — script.js
-   Audio mapping: title_a.mp3, word_a1.mp3, word_b2.mp3, ...
+   Audio naming: title_a.mp3, word_a1.mp3, word_b2.mp3, ...
    - Up to 26 columns (a..z)
    - Titles playable anytime
    - Tile audio only after Submit
+   - Guards against missing DOM nodes (no null errors)
    ========================================= */
 
-const DATA_DIR = 'data/';                 // CSVs live here
-const AUDIO_DIRS = ['data/audio/'];       // Audio base(s). First try dataset subfolder, then global.
+const DATA_DIR = 'data/';                 // CSVs here
+const AUDIO_DIRS = ['data/audio/'];       // Audio bases
 
 // ---------- Helpers ----------
 const qs  = sel => document.querySelector(sel);
 const qsa = sel => Array.from(document.querySelectorAll(sel));
 const pad2 = n => String(n).padStart(2, '0');
-
-function colLetter(index){ // 0 -> 'a', 25 -> 'z'
-  return String.fromCharCode('a'.charCodeAt(0) + index);
-}
+const colLetter = i => String.fromCharCode('a'.charCodeAt(0) + i);
 
 // ---------- Timer ----------
 let timerId = null, tStart = null;
@@ -25,22 +23,20 @@ function startTimer(){
   stopTimer();
   timerId = setInterval(()=>{
     const s = Math.floor((Date.now()-tStart)/1000);
-    qs('#timer').textContent = `${pad2(Math.floor(s/60))}:${pad2(s%60)}`;
+    const el = qs('#timer'); if (el) el.textContent = `${pad2(Math.floor(s/60))}:${pad2(s%60)}`;
   }, 250);
 }
 function stopTimer(){ if (timerId) clearInterval(timerId); timerId = null; }
 
-// ---------- CSV loading (auto-detect common delimiters) ----------
+// ---------- CSV load (auto delimiter) ----------
 async function loadCSV(url){
   const raw = await fetch(url).then(r => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.text();
   });
-
   const text = raw.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
   const lines = text.split('\n').filter(l => l.trim().length);
   if (!lines.length) return [];
-
   const delims = [',',';','\t','|'];
   let best = { score: 0, rows: [] };
   for (const d of delims){
@@ -66,14 +62,7 @@ function splitCSVLine(line, delim){
   return out;
 }
 
-// ---------- Audio URL builders (ORIGINAL NAMING) ----------
-/*
-  Titles: title_<colLetter>.mp3
-  Tiles:  word_<colLetter><rowNumber>.mp3    (rowNumber is 1-based)
-  Search order for each audio:
-    1) data/audio/<datasetName>/<file>
-    2) data/audio/<file>
-*/
+// ---------- Audio (original naming) ----------
 async function resolveAudioURL(file, dataset){
   const candidates = [
     ...AUDIO_DIRS.map(base => `${base}${dataset}/${file}`),
@@ -87,29 +76,21 @@ async function resolveAudioURL(file, dataset){
   }
   return null;
 }
-function titleFilename(colIdx){
-  const letter = colLetter(colIdx);
-  return `title_${letter}.mp3`;
-}
-function wordFilename(colIdx, rowIdx){ // rowIdx is 0-based here; convert to 1-based
-  const letter = colLetter(colIdx);
-  const n = rowIdx + 1;
-  return `word_${letter}${n}.mp3`;
-}
+const titleFilename = colIdx => `title_${colLetter(colIdx)}.mp3`;
+const wordFilename  = (colIdx, rowIdx) => `word_${colLetter(colIdx)}${rowIdx+1}.mp3`;
 
 // ---------- Data model ----------
 /*
-  header = first row (titles) -> N columns (max 26)
+  header = first row (titles) -> N columns (<=26)
   dataRows = remaining rows -> M rows
-  Grid dimensions: rows = M, cols = N
-  For each data cell (r,c) create a tile:
-    tile.targetRow = r, tile.targetCol = c
+  Grid: rows = M, cols = N
+  Tile matches row=r, col=c
 */
 let DATASET_NAME = 'dataset01';
 let HEADER = [];
 let DATA_ROWS = [];
-let ALL_TILES = [];      // every tile object
-let PLACED_COUNT = 0;    // to enable Submit when all placed
+let ALL_TILES = [];
+let PLACED_COUNT = 0;
 let SUBMITTED = false;
 
 function makeTiles(dataRows){
@@ -128,6 +109,7 @@ function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.ran
 // ---------- Rendering ----------
 function renderTitles(header){
   const titles = qs('#titles');
+  if (!titles) return;
   titles.innerHTML = '';
   titles.style.gridTemplateColumns = `repeat(${header.length}, var(--tile-w))`;
   header.forEach((name, i)=>{
@@ -153,6 +135,7 @@ function renderTitles(header){
 
 function renderGrid(numRows, numCols){
   const grid = qs('#grid');
+  if (!grid) return;
   grid.innerHTML = '';
   for (let r=0; r<numRows; r++){
     const rowEl = document.createElement('div');
@@ -162,15 +145,12 @@ function renderGrid(numRows, numCols){
       cell.className = 'dropcell';
       cell.dataset.row = String(r);
       cell.dataset.col = String(c);
-
-      // Accept drops anywhere (no correctness check until submit)
       cell.addEventListener('dragover', e => e.preventDefault());
       cell.addEventListener('drop', e => {
         e.preventDefault();
         const id = e.dataTransfer.getData('text/plain');
         placeTileInCell(id, cell);
       });
-
       rowEl.appendChild(cell);
     }
     grid.appendChild(rowEl);
@@ -179,6 +159,7 @@ function renderGrid(numRows, numCols){
 
 function renderPool(tiles){
   const pool = qs('#pool');
+  if (!pool) return;
   pool.innerHTML = '';
   tiles.forEach(tile=>{
     const btn = document.createElement('button');
@@ -187,8 +168,6 @@ function renderPool(tiles){
     btn.dataset.id = tile.id;
     btn.dataset.row = String(tile.targetRow);
     btn.dataset.col = String(tile.targetCol);
-
-    // speaker button is present but disabled until Submit
     btn.innerHTML = `<span class="label">${tile.text}</span><button class="speak" type="button" title="Play" disabled>🔊</button>`;
 
     btn.addEventListener('dragstart', e=>{
@@ -215,16 +194,17 @@ function renderPool(tiles){
   });
 }
 
-// Move tile element into a cell (from pool or another cell)
+// Move tile into a cell
 function placeTileInCell(tileId, cell){
-  if (SUBMITTED) return; // lock board after submit
+  if (SUBMITTED) return;
 
-  // Only allow one tile per cell; if occupied, swap out to pool
+  // One per cell: if occupied, swap to pool
   if (cell.childElementCount > 0){
     const existing = cell.firstElementChild;
     if (existing && existing.classList.contains('tile')){
-      qs('#pool').appendChild(existing);
-      PLACED_COUNT--; // freeing a cell
+      const pool = qs('#pool');
+      if (pool) pool.appendChild(existing);
+      PLACED_COUNT = Math.max(0, PLACED_COUNT - 1); // freed a cell
     }
     cell.innerHTML = '';
   }
@@ -232,21 +212,20 @@ function placeTileInCell(tileId, cell){
   const tileEl = document.querySelector(`.tile[data-id="${tileId}"]`);
   if (!tileEl) return;
 
-  // If tile was previously in a cell, free that cell
   const prevParent = tileEl.parentElement;
   if (prevParent && prevParent.classList.contains('dropcell')){
     prevParent.innerHTML = '';
-    // moving within grid doesn't change PLACED_COUNT
   } else {
-    // from pool into grid
     PLACED_COUNT++;
   }
 
   cell.appendChild(tileEl);
 
-  // Enable submit when everything is placed
-  const totalTiles = ALL_TILES.length;
-  qs('#submitBtn').disabled = (PLACED_COUNT !== totalTiles);
+  const submitBtn = qs('#submitBtn');
+  if (submitBtn){
+    const totalTiles = ALL_TILES.length;
+    submitBtn.disabled = (PLACED_COUNT !== totalTiles);
+  }
 }
 
 // ---------- Submit (grade & score) ----------
@@ -255,7 +234,6 @@ function onSubmit(){
   SUBMITTED = true;
   stopTimer();
 
-  // Evaluate all cells
   let score = 0;
   const total = ALL_TILES.length;
 
@@ -284,60 +262,62 @@ function onSubmit(){
     }
   });
 
-  // Any tiles left in pool are automatically wrong
+  // Leftovers in pool are incorrect
   qsa('#pool .tile').forEach(t => t.classList.add('incorrect'));
 
   // Enable tile audio after submit
   qsa('.tile .speak').forEach(b => b.disabled = false);
 
-  // Show score
-  qs('#status').textContent = `Score: ${score} / ${total}`;
+  const status = qs('#status');
+  if (status) status.textContent = `Score: ${score} / ${total}`;
+
+  // Keep Submit disabled after grading
+  const submitBtn = qs('#submitBtn');
+  if (submitBtn) submitBtn.disabled = true;
 }
 
 // ---------- Init ----------
 async function init(){
-  // dataset param
   const params = new URLSearchParams(location.search);
   DATASET_NAME = (params.get('dataset') || 'dataset01').trim();
-  qs('#datasetName').textContent = DATASET_NAME;
+  const dsEl = qs('#datasetName'); if (dsEl) dsEl.textContent = DATASET_NAME;
 
-  // Load CSV from /data
+  // Load CSV
   const csvURL = `${DATA_DIR}${DATASET_NAME}.csv`;
   let rows = [];
-  try{
-    rows = await loadCSV(csvURL);
-  }catch(e){
-    qs('#status').textContent = `Could not load ${csvURL} (${e.message}).`;
+  try{ rows = await loadCSV(csvURL); }
+  catch(e){
+    const st = qs('#status'); if (st) st.textContent = `Could not load ${csvURL} (${e.message}).`;
     return;
   }
   if (!rows.length){
-    qs('#status').textContent = `Dataset ${csvURL} is empty.`;
+    const st = qs('#status'); if (st) st.textContent = `Dataset ${csvURL} is empty.`;
     return;
   }
 
-  // Header + data
   HEADER = rows[0].filter(x => x.trim().length);
   if (HEADER.length > 26){
-    qs('#status').textContent = `This dataset has ${HEADER.length} columns; max supported is 26 (a..z).`;
+    const st = qs('#status'); if (st) st.textContent = `This dataset has ${HEADER.length} columns; max supported is 26 (a..z).`;
     return;
   }
   DATA_ROWS = rows.slice(1).map(r => r.slice(0, HEADER.length));
-  const numRows = DATA_ROWS.length;
-  const numCols = HEADER.length;
 
   renderTitles(HEADER);
-  renderGrid(numRows, numCols);
+  renderGrid(DATA_ROWS.length, HEADER.length);
 
   ALL_TILES = makeTiles(DATA_ROWS);
   PLACED_COUNT = 0;
   SUBMITTED = false;
   renderPool(ALL_TILES);
 
-  // Buttons
-  qs('#resetBtn').addEventListener('click', ()=>location.reload());
-  qs('#submitBtn').addEventListener('click', onSubmit);
+  // Buttons (guarded)
+  qs('#resetBtn')?.addEventListener('click', ()=>location.reload());
+  qs('#submitBtn')?.addEventListener('click', onSubmit);
 
-  // Timer
+  // Ensure Submit starts disabled
+  const submitBtn = qs('#submitBtn');
+  if (submitBtn) submitBtn.disabled = (PLACED_COUNT !== ALL_TILES.length);
+
   startTimer();
 }
 

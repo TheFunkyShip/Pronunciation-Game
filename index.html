@@ -5,39 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Match the Pronunciation</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- tiny inline favicon to stop 404 noise -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%232563eb'/%3E%3Ctext x='32' y='40' font-size='28' text-anchor='middle' fill='white'%3EMP%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
   <main class="app">
     <header>
       <h1>Match the Pronunciation</h1>
       <p class="subtitle">
-        Drag each word into the correct column. First CSV row = column titles. Rows after that = words to place.
-        <br>Tip: add <code>?dataset=dataset01</code> to the URL to pick a CSV.
+        First row of the CSV are the <strong>column titles</strong>. Other rows are the <strong>words to place</strong>.
+        CSVs live in <code>/data</code>. Audio files live in <code>/data/audio</code>.
       </p>
-
       <div class="toolbar">
         <div id="timer">00:00</div>
-        <button id="resetBtn" type="button" class="btn">Reset & Reshuffle</button>
+        <!-- ✅ Submit button is here -->
+        <button id="submitBtn" class="btn btn-primary" type="button" disabled>Submit</button>
+        <button id="resetBtn" class="btn" type="button">Reset &amp; Reshuffle</button>
       </div>
     </header>
 
-    <!-- Column titles (auto-filled) -->
-    <section id="titles"></section>
+    <!-- Column titles -->
+    <section id="titles" aria-label="Categories"></section>
 
-    <!-- Drop grid (auto-built) -->
-    <section id="grid"></section>
+    <!-- Grid (rows = data rows; cols = titles) -->
+    <section id="grid" aria-label="Answer grid"></section>
 
     <!-- Word pool -->
     <section class="section">
       <h3>Drag these words ➜</h3>
-      <div id="pool"></div>
+      <div id="pool" aria-label="Word pool"></div>
     </section>
 
     <p id="status"></p>
 
-    <footer style="margin-top:40px; color:#64748b; font-size:0.9rem;">
+    <footer class="footer">
       Dataset: <code id="datasetName">dataset01</code> •
-      Share links like <code>?dataset=dataset01</code>, <code>?dataset=dataset02</code>, etc.
+      Use <code>?dataset=dataset01</code> (no “.csv”). Files expected at <code>/data/dataset01.csv</code>.
     </footer>
   </main>
 
