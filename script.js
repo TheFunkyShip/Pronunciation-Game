@@ -1,23 +1,21 @@
 /* =========================================
-   Pronunciation Game — script.js
-   Audio naming: title_a.mp3, word_a1.mp3, word_b2.mp3, ...
-   - Up to 26 columns (a..z)
-   - Titles playable anytime
-   - Tile audio only after Submit
-   - Guards against missing DOM nodes (no null errors)
+   Pronunciation Game — script.js (column-based scoring)
+   - CSV: row 1 = titles; rows 2+ = words; column = category
+   - Correctness: tile is correct if dropped in its source column (row ignored)
+   - Grid rows = max words in any column; columns = number of titles
+   - Audio naming: title_a.mp3, word_a1.mp3, word_b2.mp3, ...
    ========================================= */
 
-const DATA_DIR = 'data/';                 // CSVs here
-const AUDIO_DIRS = ['data/audio/'];       // Audio bases
+const DATA_DIR = 'data/';
+const AUDIO_DIRS = ['data/audio/'];
 
-// ---------- Helpers ----------
 const qs  = sel => document.querySelector(sel);
 const qsa = sel => Array.from(document.querySelectorAll(sel));
 const pad2 = n => String(n).padStart(2, '0');
 const colLetter = i => String.fromCharCode('a'.charCodeAt(0) + i);
 
 // ---------- Timer ----------
-let timerId = null, tStart = null;
+let timerId = null, tStart = null, SUBMITTED = false;
 function startTimer(){
   tStart = Date.now();
   stopTimer();
@@ -28,12 +26,9 @@ function startTimer(){
 }
 function stopTimer(){ if (timerId) clearInterval(timerId); timerId = null; }
 
-// ---------- CSV load (auto delimiter) ----------
+// ---------- CSV (auto delimiter) ----------
 async function loadCSV(url){
-  const raw = await fetch(url).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.text();
-  });
+  const raw = await fetch(url).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
   const text = raw.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
   const lines = text.split('\n').filter(l => l.trim().length);
   if (!lines.length) return [];
@@ -51,12 +46,9 @@ function splitCSVLine(line, delim){
   const out = []; let cur = '', inQ = false;
   for (let i=0;i<line.length;i++){
     const ch = line[i];
-    if (ch === '"'){
-      if (inQ && line[i+1] === '"'){ cur += '"'; i++; }
-      else inQ = !inQ;
-    } else if (ch === delim && !inQ){
-      out.push(cur); cur='';
-    } else cur += ch;
+    if (ch === '"'){ if (inQ && line[i+1] === '"'){ cur += '"'; i++; } else inQ = !inQ; }
+    else if (ch === delim && !inQ){ out.push(cur); cur=''; }
+    else cur += ch;
   }
   out.push(cur);
   return out;
@@ -69,47 +61,46 @@ async function resolveAudioURL(file, dataset){
     ...AUDIO_DIRS.map(base => `${base}${file}`),
   ];
   for (const url of candidates){
-    try{
-      const res = await fetch(url, { method:'HEAD', cache:'no-store' });
-      if (res.ok) return url;
-    }catch(e){}
+    try{ const res = await fetch(url, { method:'HEAD', cache:'no-store' }); if (res.ok) return url; }catch(e){}
   }
   return null;
 }
 const titleFilename = colIdx => `title_${colLetter(colIdx)}.mp3`;
-const wordFilename  = (colIdx, rowIdx) => `word_${colLetter(colIdx)}${rowIdx+1}.mp3`;
+const wordFilename  = (colIdx, rowIdx1based) => `word_${colLetter(colIdx)}${rowIdx1based}.mp3`;
 
-// ---------- Data model ----------
-/*
-  header = first row (titles) -> N columns (<=26)
-  dataRows = remaining rows -> M rows
-  Grid: rows = M, cols = N
-  Tile matches row=r, col=c
-*/
+// ---------- Data ----------
 let DATASET_NAME = 'dataset01';
 let HEADER = [];
-let DATA_ROWS = [];
-let ALL_TILES = [];
+let DATA_ROWS = [];     // 2D array (may have uneven column depths)
+let ALL_TILES = [];     // {id, text, sourceCol, sourceRow1based}
 let PLACED_COUNT = 0;
-let SUBMITTED = false;
 
-function makeTiles(dataRows){
+function buildTilesFromColumns(dataRows){
   const tiles = [];
-  dataRows.forEach((row, r) => {
-    row.forEach((word, c) => {
-      if (word && word.trim().length){
-        tiles.push({ id:`t_${r}_${c}`, text:word.trim(), targetRow:r, targetCol:c });
+  // For each column, collect words downwards; row index becomes 1-based for filename mapping
+  const numCols = HEADER.length;
+  for (let c = 0; c < numCols; c++){
+    let rowNumber = 1;
+    for (let r = 0; r < dataRows.length; r++){
+      const word = (dataRows[r][c] || '').trim();
+      if (word){
+        tiles.push({
+          id: `t_${r}_${c}_${rowNumber}`,
+          text: word,
+          sourceCol: c,            // used to check correctness (column only)
+          sourceRow1: rowNumber    // used for audio filename word_<letter><rowNumber>.mp3
+        });
+        rowNumber++;
       }
-    });
-  });
+    }
+  }
   return shuffle(tiles);
 }
 function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 
 // ---------- Rendering ----------
 function renderTitles(header){
-  const titles = qs('#titles');
-  if (!titles) return;
+  const titles = qs('#titles'); if (!titles) return;
   titles.innerHTML = '';
   titles.style.gridTemplateColumns = `repeat(${header.length}, var(--tile-w))`;
   header.forEach((name, i)=>{
@@ -134,8 +125,7 @@ function renderTitles(header){
 }
 
 function renderGrid(numRows, numCols){
-  const grid = qs('#grid');
-  if (!grid) return;
+  const grid = qs('#grid'); if (!grid) return;
   grid.innerHTML = '';
   for (let r=0; r<numRows; r++){
     const rowEl = document.createElement('div');
@@ -158,16 +148,15 @@ function renderGrid(numRows, numCols){
 }
 
 function renderPool(tiles){
-  const pool = qs('#pool');
-  if (!pool) return;
+  const pool = qs('#pool'); if (!pool) return;
   pool.innerHTML = '';
   tiles.forEach(tile=>{
     const btn = document.createElement('button');
     btn.className = 'tile';
     btn.draggable = true;
     btn.dataset.id = tile.id;
-    btn.dataset.row = String(tile.targetRow);
-    btn.dataset.col = String(tile.targetCol);
+    btn.dataset.sourceCol = String(tile.sourceCol);
+    btn.dataset.sourceRow1 = String(tile.sourceRow1);
     btn.innerHTML = `<span class="label">${tile.text}</span><button class="speak" type="button" title="Play" disabled>🔊</button>`;
 
     btn.addEventListener('dragstart', e=>{
@@ -184,9 +173,9 @@ function renderPool(tiles){
     sp.addEventListener('click', async (e)=>{
       e.stopPropagation();
       if (!SUBMITTED) return;
-      const r = Number(btn.dataset.row);
-      const c = Number(btn.dataset.col);
-      const url = await resolveAudioURL(wordFilename(c, r), DATASET_NAME);
+      const col = Number(btn.dataset.sourceCol);
+      const row1 = Number(btn.dataset.sourceRow1);
+      const url = await resolveAudioURL(wordFilename(col, row1), DATASET_NAME);
       if (url) new Audio(url).play().catch(()=>{});
     });
 
@@ -194,17 +183,25 @@ function renderPool(tiles){
   });
 }
 
-// Move tile into a cell
+// After any move, recompute placed count and update Submit
+function refreshPlacedCountAndSubmit(){
+  PLACED_COUNT = qsa('.dropcell .tile').length;
+  const submitBtn = qs('#submitBtn');
+  if (submitBtn){
+    submitBtn.disabled = (PLACED_COUNT !== ALL_TILES.length);
+  }
+}
+
+// Move tile into a cell (free placement; one per cell)
 function placeTileInCell(tileId, cell){
   if (SUBMITTED) return;
 
-  // One per cell: if occupied, swap to pool
+  // If occupied, move existing back to pool (do NOT change counters here)
   if (cell.childElementCount > 0){
     const existing = cell.firstElementChild;
-    if (existing && existing.classList.contains('tile')){
-      const pool = qs('#pool');
-      if (pool) pool.appendChild(existing);
-      PLACED_COUNT = Math.max(0, PLACED_COUNT - 1); // freed a cell
+    const pool = qs('#pool');
+    if (existing && existing.classList.contains('tile') && pool){
+      pool.appendChild(existing);
     }
     cell.innerHTML = '';
   }
@@ -212,23 +209,19 @@ function placeTileInCell(tileId, cell){
   const tileEl = document.querySelector(`.tile[data-id="${tileId}"]`);
   if (!tileEl) return;
 
+  // If dragged from another cell, free that cell
   const prevParent = tileEl.parentElement;
   if (prevParent && prevParent.classList.contains('dropcell')){
     prevParent.innerHTML = '';
-  } else {
-    PLACED_COUNT++;
   }
 
   cell.appendChild(tileEl);
 
-  const submitBtn = qs('#submitBtn');
-  if (submitBtn){
-    const totalTiles = ALL_TILES.length;
-    submitBtn.disabled = (PLACED_COUNT !== totalTiles);
-  }
+  // Recompute placed count from DOM to avoid drift (handles swaps perfectly)
+  refreshPlacedCountAndSubmit();
 }
 
-// ---------- Submit (grade & score) ----------
+// ---------- Submit (grade & score: by column only) ----------
 function onSubmit(){
   if (SUBMITTED) return;
   SUBMITTED = true;
@@ -237,21 +230,18 @@ function onSubmit(){
   let score = 0;
   const total = ALL_TILES.length;
 
+  // Evaluate only cells that contain a tile; empty cells are neutral
   qsa('.dropcell').forEach(cell=>{
-    const r = Number(cell.dataset.row);
     const c = Number(cell.dataset.col);
     const tile = cell.querySelector('.tile');
 
     cell.classList.remove('correct','incorrect');
     if (tile) tile.classList.remove('correct','incorrect');
 
-    if (!tile){
-      cell.classList.add('incorrect');
-      return;
-    }
-    const tr = Number(tile.dataset.row);
-    const tc = Number(tile.dataset.col);
-    const ok = (tr === r) && (tc === c);
+    if (!tile) return; // neutral
+
+    const srcCol = Number(tile.dataset.sourceCol);
+    const ok = (srcCol === c);
     if (ok){
       score++;
       cell.classList.add('correct');
@@ -262,7 +252,7 @@ function onSubmit(){
     }
   });
 
-  // Leftovers in pool are incorrect
+  // Leftover tiles in pool are incorrect (not placed)
   qsa('#pool .tile').forEach(t => t.classList.add('incorrect'));
 
   // Enable tile audio after submit
@@ -271,7 +261,7 @@ function onSubmit(){
   const status = qs('#status');
   if (status) status.textContent = `Score: ${score} / ${total}`;
 
-  // Keep Submit disabled after grading
+  // Lock submit
   const submitBtn = qs('#submitBtn');
   if (submitBtn) submitBtn.disabled = true;
 }
@@ -279,34 +269,39 @@ function onSubmit(){
 // ---------- Init ----------
 async function init(){
   const params = new URLSearchParams(location.search);
-  DATASET_NAME = (params.get('dataset') || 'dataset01').trim();
+  const ds = (params.get('dataset') || 'dataset01').trim();
+  DATASET_NAME = ds;
   const dsEl = qs('#datasetName'); if (dsEl) dsEl.textContent = DATASET_NAME;
 
   // Load CSV
   const csvURL = `${DATA_DIR}${DATASET_NAME}.csv`;
   let rows = [];
   try{ rows = await loadCSV(csvURL); }
-  catch(e){
-    const st = qs('#status'); if (st) st.textContent = `Could not load ${csvURL} (${e.message}).`;
-    return;
-  }
-  if (!rows.length){
-    const st = qs('#status'); if (st) st.textContent = `Dataset ${csvURL} is empty.`;
-    return;
-  }
+  catch(e){ const st = qs('#status'); if (st) st.textContent = `Could not load ${csvURL} (${e.message}).`; return; }
+  if (!rows.length){ const st = qs('#status'); if (st) st.textContent = `Dataset ${csvURL} is empty.`; return; }
 
-  HEADER = rows[0].filter(x => x.trim().length);
-  if (HEADER.length > 26){
-    const st = qs('#status'); if (st) st.textContent = `This dataset has ${HEADER.length} columns; max supported is 26 (a..z).`;
-    return;
+  // Header + data (keep rectangular by padding with "")
+  HEADER = rows[0].slice(0, 26).map(x => (x||'').trim()); // limit 26 columns
+  if (!HEADER.length){ const st = qs('#status'); if (st) st.textContent = 'Dataset header row is empty.'; return; }
+  const width = HEADER.length;
+  DATA_ROWS = rows.slice(1).map(r => {
+    const row = r.slice(0, width);
+    while (row.length < width) row.push('');
+    return row;
+  });
+
+  // Compute grid height = max non-empty items in any column
+  let maxPerCol = 0;
+  for (let c=0; c<width; c++){
+    let count = 0;
+    for (let r=0; r<DATA_ROWS.length; r++){ if ((DATA_ROWS[r][c]||'').trim()) count++; }
+    if (count > maxPerCol) maxPerCol = count;
   }
-  DATA_ROWS = rows.slice(1).map(r => r.slice(0, HEADER.length));
 
   renderTitles(HEADER);
-  renderGrid(DATA_ROWS.length, HEADER.length);
+  renderGrid(maxPerCol, width);           // rows = tallest column, cols = titles
 
-  ALL_TILES = makeTiles(DATA_ROWS);
-  PLACED_COUNT = 0;
+  ALL_TILES = buildTilesFromColumns(DATA_ROWS);
   SUBMITTED = false;
   renderPool(ALL_TILES);
 
@@ -314,10 +309,8 @@ async function init(){
   qs('#resetBtn')?.addEventListener('click', ()=>location.reload());
   qs('#submitBtn')?.addEventListener('click', onSubmit);
 
-  // Ensure Submit starts disabled
-  const submitBtn = qs('#submitBtn');
-  if (submitBtn) submitBtn.disabled = (PLACED_COUNT !== ALL_TILES.length);
-
+  // Start with submit disabled and placed count 0
+  refreshPlacedCountAndSubmit();
   startTimer();
 }
 
