@@ -1,83 +1,223 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Match the Pronunciation</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>Match the pronunciation</h1>
-    <div class="status">
-      <div class="timer" id="timer" aria-live="polite">00:00.0</div>
-      <div class="score" id="score" aria-live="polite"></div>
-    </div>
-  </header>
 
-  <main class="layout">
-    <section class="board" aria-label="Answer board">
-      <table class="game-table" role="grid" aria-label="Pronunciation table">
-        <thead>
-          <tr>
-            <th id="colAHeader">
-              <div class="title-wrap">
-                <span class="title-text" id="titleAText">Title A</span>
-                <button class="speaker" id="speakTitleA" title="Hear column A title" aria-label="Hear column A title">🔊</button>
-              </div>
-            </th>
-            <th id="colBHeader">
-              <div class="title-wrap">
-                <span class="title-text" id="titleBText">Title B</span>
-                <button class="speaker" id="speakTitleB" title="Hear column B title" aria-label="Hear column B title">🔊</button>
-              </div>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="dropzone" data-col="A"></td>
-            <td class="dropzone" data-col="B"></td>
-          </tr>
-          <tr>
-            <td class="dropzone" data-col="A"></td>
-            <td class="dropzone" data-col="B"></td>
-          </tr>
-          <tr>
-            <td class="dropzone" data-col="A"></td>
-            <td class="dropzone" data-col="B"></td>
-          </tr>
-          <tr>
-            <td class="dropzone" data-col="A"></td>
-            <td class="dropzone" data-col="B"></td>
-          </tr>
-          <tr>
-            <td class="dropzone" data-col="A"></td>
-            <td class="dropzone" data-col="B"></td>
-          </tr>
-        </tbody>
-      </table>
+  <main class="app">
+    <header>
+      <h1>Match the Pronunciation</h1>
+      <p class="subtitle">
+        Drag each word into the correct column.
+        <br>
+        Tip: Refresh the page to reset and reshuffle.
+      </p>
+    </header>
 
-      <div class="controls">
-        <button id="submitBtn" class="primary" disabled>Submit</button>
-        <button id="hearBtn" class="secondary" disabled>Hear the words</button>
-      </div>
-      <p class="hint">Tip: Refresh the page to reset and reshuffle.</p>
+    <!-- Titles row (auto-filled from dataset) -->
+    <section id="titles"></section>
+
+    <!-- Sorting grid -->
+    <section id="grid"></section>
+
+    <!-- Word pool -->
+    <section class="section">
+      <h3>Drag these words ➜</h3>
+      <div id="pool"></div>
     </section>
 
-    <aside class="tray" aria-label="Word tray">
-      <h2>Drag these words ➜</h2>
-      <div id="tray" class="tile-tray" aria-live="polite"></div>
-    </aside>
+    <!-- Status / feedback -->
+    <p id="status"></p>
+
+    <footer style="margin-top:40px; color:#64748b; font-size:0.9rem;">
+      Dataset:
+      <code id="datasetName">dataset01</code> •
+      Share a link like <code>?dataset=dataset01</code>,
+      <code>?dataset=dataset02</code>, etc.
+    </footer>
   </main>
 
-  <footer class="foot">
-    <small>
-      Dataset: <code id="datasetName">dataset01</code> • Share a link like
-      <code>?dataset=dataset01</code>, <code>?dataset=dataset02</code>, etc.
-    </small>
-  </footer>
+  <!-- ===================== -->
+  <!-- JS: Game logic script -->
+  <!-- ===================== -->
+  <script>
+  /* ---------- CSV LOADING ---------- */
+  async function loadCSV(url) {
+    const text = await fetch(url).then(r => r.text());
+    const lines = text.trim().split(/\r?\n/);
 
-  <script src="script.js"></script>
+    // Split by comma, trim, and drop empty cells at the end
+    const rows = lines.map(l =>
+      l.split(",").map(c => c.trim()).filter(c => c.length > 0)
+    );
+
+    // Guard: remove empty lines
+    return rows.filter(r => r.length > 0);
+  }
+
+  /* ---------- COUNTS ---------- */
+  function countDataItemsPerRow(rows) {
+    return rows.reduce((max, r) => Math.max(max, r.length), 0);
+  }
+  function countRows(rows) {
+    return rows.length;
+  }
+
+  /* ---------- BUILD DATA MODEL ---------- */
+  function toTiles(rows) {
+    const tiles = [];
+    rows.forEach((r, pairIndex) => {
+      r.forEach((word, rowIndex) => {
+        tiles.push({
+          id: `t_${pairIndex}_${rowIndex}`,
+          text: word,
+          targetRow: rowIndex,
+          targetCol: pairIndex,
+          placed: false
+        });
+      });
+    });
+    return shuffle(tiles);
+  }
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  /* ---------- RENDERING ---------- */
+  function renderTitles(rows) {
+    const titles = document.getElementById("titles");
+    titles.innerHTML = "";
+
+    // Count how many columns the CSV has
+    const numCols = countDataItemsPerRow(rows);
+
+    for (let i = 0; i < numCols; i++) {
+      const div = document.createElement("div");
+      div.id = `title${i}`;
+      div.textContent = rows[0]?.[i] || `Title ${i + 1}`;
+      titles.appendChild(div);
+    }
+
+    // Adjust layout grid template
+    titles.style.gridTemplateColumns = `repeat(${numCols}, var(--tile-w))`;
+  }
+
+  function renderPool(tiles) {
+    const pool = document.getElementById("pool");
+    pool.innerHTML = "";
+    tiles.forEach(tile => {
+      const el = document.createElement("button");
+      el.className = "tile";
+      el.draggable = true;
+      el.textContent = tile.text;
+      el.dataset.id = tile.id;
+
+      el.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", tile.id);
+        const rect = el.getBoundingClientRect();
+        el.style.setProperty("--drag-w", rect.width + "px");
+        el.style.setProperty("--drag-h", rect.height + "px");
+        el.classList.add("dragging");
+      });
+      el.addEventListener("dragend", () => el.classList.remove("dragging"));
+
+      pool.appendChild(el);
+    });
+  }
+
+  function renderGrid(numRows, numCols) {
+    const grid = document.getElementById("grid");
+    grid.innerHTML = "";
+
+    for (let r = 0; r < numRows; r++) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "grid-row";
+      for (let c = 0; c < numCols; c++) {
+        const cell = document.createElement("div");
+        cell.className = "dropcell";
+        cell.dataset.row = String(r);
+        cell.dataset.col = String(c);
+
+        cell.addEventListener("dragover", (e) => e.preventDefault());
+        cell.addEventListener("drop", (e) => {
+          e.preventDefault();
+          const id = e.dataTransfer.getData("text/plain");
+          placeTile(id, cell);
+        });
+
+        rowEl.appendChild(cell);
+      }
+      grid.appendChild(rowEl);
+    }
+  }
+
+  /* ---------- GAME STATE ---------- */
+  let ALL_TILES = [];
+  let GRID_ROWS = 2;
+  let GRID_COLS = 0;
+
+  function placeTile(tileId, cell) {
+    const tile = ALL_TILES.find(t => t.id === tileId);
+    if (!tile) return;
+
+    const row = Number(cell.dataset.row);
+    const col = Number(cell.dataset.col);
+
+    const correct = (tile.targetRow === row) && (tile.targetCol === col);
+    if (!correct) {
+      cell.classList.add("shake");
+      setTimeout(() => cell.classList.remove("shake"), 300);
+      return;
+    }
+
+    if (cell.childElementCount > 0) return;
+
+    const pool = document.getElementById("pool");
+    const btn = pool.querySelector(`[data-id="${tile.id}"]`);
+    if (btn) {
+      btn.draggable = false;
+      btn.classList.add("placed");
+      btn.style.width = "var(--tile-w)";
+      btn.style.minWidth = "var(--tile-w)";
+      btn.style.height = "var(--tile-h)";
+      cell.appendChild(btn);
+    }
+
+    tile.placed = true;
+
+    const done = ALL_TILES.every(t => t.placed);
+    if (done) {
+      document.getElementById("status").textContent = "Nice! All done.";
+    }
+  }
+
+  /* ---------- INIT ---------- */
+  async function init() {
+    const params = new URLSearchParams(location.search);
+    const ds = params.get("dataset") || "dataset01";
+    const url = `${ds}.csv`;
+    document.getElementById("datasetName").textContent = ds;
+
+    const rows = await loadCSV(url);
+    GRID_ROWS = countDataItemsPerRow(rows);
+    GRID_COLS = countRows(rows);
+
+    renderTitles(rows);
+    renderGrid(GRID_ROWS, GRID_COLS);
+
+    ALL_TILES = toTiles(rows);
+    renderPool(ALL_TILES);
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+  </script>
 </body>
 </html>

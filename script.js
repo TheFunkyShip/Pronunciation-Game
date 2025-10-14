@@ -1,329 +1,188 @@
-// Pronunciation Game - main logic
-// Expected layout:
-//   /index.html
-//   /style.css
-//   /script.js
-//   /data/datasetXX.csv
-//   /audio/datasetXX/(title_a.mp3, title_b.mp3, word_a1..a5.mp3, word_b1..b5.mp3)
+<script>
+/* ---------- CSV LOADING ---------- */
+async function loadCSV(url) {
+  const text = await fetch(url).then(r => r.text());
+  const lines = text.trim().split(/\r?\n/);
 
-(function () {
-  // --- Helpers ---
-  const qs = new URLSearchParams(location.search);
-  const DATASET = (qs.get("dataset") || "dataset01").toLowerCase();
-  const paths = {
-    csv: `data/${DATASET}.csv`,
-    audio: `audio/${DATASET}`,
-  };
+  // Split by comma, trim, and drop empty cells at the end
+  const rows = lines.map(l =>
+    l.split(",").map(c => c.trim()).filter(c => c.length > 0)
+  );
 
-  // Page elements
-  const titleAText = document.getElementById("titleAText");
-  const titleBText = document.getElementById("titleBText");
-  const speakTitleA = document.getElementById("speakTitleA");
-  const speakTitleB = document.getElementById("speakTitleB");
-  const tray = document.getElementById("tray");
-  const dropzones = Array.from(document.querySelectorAll(".dropzone"));
-  const submitBtn = document.getElementById("submitBtn");
-  const hearBtn = document.getElementById("hearBtn");
-  const timerEl = document.getElementById("timer");
-  const scoreEl = document.getElementById("score");
-  const colAHeader = document.getElementById("colAHeader");
-  const colBHeader = document.getElementById("colBHeader");
-  const datasetNameEl = document.getElementById("datasetName");
-  if (datasetNameEl) datasetNameEl.textContent = DATASET;
+  // Guard: remove empty lines
+  return rows.filter(r => r.length > 0);
+}
 
-  // State
-  let titles = { A: "", B: "" };
-  let wordsA = [];
-  let wordsB = [];
-  let submitted = false;
-  const mapWordToSet = new Map();   // "rants" -> "A"
-  const mapWordToAudio = new Map(); // "rants" -> "audio/dataset01/word_a1.mp3"
+/* ---------- COUNTS ---------- */
+function countDataItemsPerRow(rows) {
+  // Max items found in any row (how many table rows to render)
+  return rows.reduce((max, r) => Math.max(max, r.length), 0);
+}
 
-  // Timer state
-  let started = false;
-  let startMs = 0;
-  let tick = null;
+function countRows(rows) {
+  // How many pairs (how many table columns to render)
+  return rows.length;
+}
 
-  // --- Utilities ---
-  const shuffle = (arr) =>
-    arr
-      .map((v) => ({ v, r: Math.random() }))
-      .sort((a, b) => a.r - b.r)
-      .map((o) => o.v);
-
-  const fmtTime = (ms) => {
-    const t = Math.max(0, ms | 0);
-    const m = Math.floor(t / 60000);
-    const s = Math.floor((t % 60000) / 1000);
-    const ds = Math.floor((t % 1000) / 100);
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ds}`;
-  };
-
-  function startTimer() {
-    if (started) return;
-    started = true;
-    startMs = performance.now();
-    tick = setInterval(() => {
-      timerEl.textContent = fmtTime(performance.now() - startMs);
-    }, 100);
-  }
-  function stopTimer() {
-    if (tick) {
-      clearInterval(tick);
-      tick = null;
-    }
-  }
-
-  // Robust CSV parser for this simple 2-line, 6-fields-per-line case
-  function parseCSV(text) {
-    // remove BOM if present
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-    const clean = (s) => s.trim().replace(/^['"“”‘’]+|['"“”‘’]+$/g, "");
-    const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
-
-    if (lines.length < 2) {
-      throw new Error("CSV must have two non-empty lines.");
-    }
-
-    const rows = lines.map((line) => {
-      const parts = [];
-      let cur = "";
-      let inQ = false;
-
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          // Toggle quote (naive handling is fine for this format)
-          inQ = !inQ;
-        } else if (ch === "," && !inQ) {
-          parts.push(clean(cur));
-          cur = "";
-        } else {
-          cur += ch;
-        }
-      }
-      parts.push(clean(cur));
-      return parts.map((x) => x.trim());
-    });
-
-    // Expect 6 values per line: [title, w1, w2, w3, w4, w5]
-    if (rows[0].length !== 6 || rows[1].length !== 6) {
-      console.warn("CSV rows should each have 6 values. Got:", rows);
-    }
-
-    return rows;
-  }
-
-  async function load() {
-    console.log("[Game] Loading dataset:", DATASET, paths.csv);
-    const res = await fetch(paths.csv, { cache: "no-store" });
-    if (!res.ok) {
-      throw new Error(`Failed to load CSV at ${paths.csv} (status ${res.status})`);
-    }
-    const text = await res.text();
-    const rows = parseCSV(text);
-
-    // Row 1 -> Column A, Row 2 -> Column B
-    titles.A = rows[0][0] || "Column A";
-    titles.B = rows[1][0] || "Column B";
-    wordsA = rows[0].slice(1).filter(Boolean);
-    wordsB = rows[1].slice(1).filter(Boolean);
-
-    // Set titles in the header immediately
-    titleAText.textContent = titles.A;
-    titleBText.textContent = titles.B;
-
-    // Build maps for correctness and audio paths (based on CSV order)
-    wordsA.forEach((w, i) => {
-      mapWordToSet.set(w, "A");
-      mapWordToAudio.set(w, `${paths.audio}/word_a${i + 1}.mp3`);
-    });
-    wordsB.forEach((w, i) => {
-      mapWordToSet.set(w, "B");
-      mapWordToAudio.set(w, `${paths.audio}/word_b${i + 1}.mp3`);
-    });
-
-    // Attach title audio buttons
-    const titleAudioA = new Audio(`${paths.audio}/title_a.mp3`);
-    const titleAudioB = new Audio(`${paths.audio}/title_b.mp3`);
-    speakTitleA.addEventListener("click", () => {
-      titleAudioA.currentTime = 0;
-      titleAudioA.play();
-      colAHeader.classList.add("speaking");
-      titleAudioA.onended = () => colAHeader.classList.remove("speaking");
-      titleAudioA.onerror = () => colAHeader.classList.remove("speaking");
-    });
-    speakTitleB.addEventListener("click", () => {
-      titleAudioB.currentTime = 0;
-      titleAudioB.play();
-      colBHeader.classList.add("speaking");
-      titleAudioB.onended = () => colBHeader.classList.remove("speaking");
-      titleAudioB.onerror = () => colBHeader.classList.remove("speaking");
-    });
-
-    // Create tiles (shuffled)
-    const tiles = shuffle([
-      ...wordsA.map((w) => ({ text: w, set: "A" })),
-      ...wordsB.map((w) => ({ text: w, set: "B" })),
-    ]);
-
-    tiles.forEach(({ text, set }) => {
-      const el = document.createElement("div");
-      el.className = "tile";
-      el.textContent = text;
-      el.draggable = true;
-      el.dataset.set = set; // 'A' or 'B'
-      el.addEventListener("dragstart", (e) => {
-        e.dataTransfer.setData("text/plain", text);
-        e.dataTransfer.effectAllowed = "move";
-        // set drag image for nicer UX
-        try {
-          e.dataTransfer.setDragImage(el, el.offsetWidth / 2, el.offsetHeight / 2);
-        } catch (_) {}
-        startTimer();
-        el.classList.add("dragging");
-      });
-      el.addEventListener("dragend", () => {
-        el.classList.remove("dragging");
-      });
-      el.addEventListener("mousedown", startTimer, { once: true });
-      tray.appendChild(el);
-    });
-
-    // Enable DnD on tray and dropzones (moving tiles back and forth)
-    const containers = [tray, ...dropzones];
-    containers.forEach((zone) => {
-      zone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        if (zone.classList) zone.classList.add("over");
-        e.dataTransfer.dropEffect = "move";
-      });
-      zone.addEventListener("dragleave", () => zone.classList && zone.classList.remove("over"));
-      zone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        if (zone.classList) zone.classList.remove("over");
-        const text = e.dataTransfer.getData("text/plain");
-        const allTiles = Array.from(document.querySelectorAll(".tile"));
-        const dragging = allTiles.find((t) => t.classList.contains("dragging") && t.textContent === text);
-        const tile = dragging || allTiles.find((t) => t.textContent === text);
-        if (!tile) return;
-
-        // If dropping into a non-tray cell that already has a tile, return that tile to tray first
-        if (zone !== tray && zone.firstElementChild) {
-          tray.appendChild(zone.firstElementChild);
-        }
-        zone.appendChild(tile);
-        updateSubmitState();
+/* ---------- BUILD DATA MODEL ---------- */
+/*
+  We treat CSV like:
+    row i -> items [A_i, B_i] (2 columns)
+  We turn this into tiles with known (targetRow, targetCol):
+    targetRow = index within the row (0 for column A, 1 for column B)
+    targetCol = the pair index across the dataset
+*/
+function toTiles(rows) {
+  const tiles = [];
+  rows.forEach((r, pairIndex) => {
+    r.forEach((word, rowIndex) => {
+      tiles.push({
+        id: `t_${pairIndex}_${rowIndex}`,
+        text: word,
+        targetRow: rowIndex,   // 0 or 1 (for “still 2 columns”)
+        targetCol: pairIndex,  // which pair/column in the grid
+        placed: false
       });
     });
-
-    // Submit: score and lock tiles
-    submitBtn.addEventListener("click", () => {
-      if (submitted) return;
-      submitted = true;
-      stopTimer();
-
-      let score = 0;
-      dropzones.forEach((z) => {
-        z.classList.remove("correct", "incorrect");
-        const tile = z.firstElementChild;
-        if (tile) {
-          const expected = z.dataset.col; // 'A' or 'B'
-          const got = tile.dataset.set;
-          if (expected === got) {
-            score++;
-            z.classList.add("correct");
-          } else {
-            z.classList.add("incorrect");
-          }
-        } else {
-          z.classList.add("incorrect");
-        }
-      });
-
-      scoreEl.textContent = `Score: ${score}/10`;
-      hearBtn.disabled = false;
-      // Lock tiles to preserve order for playback
-      Array.from(document.querySelectorAll(".tile")).forEach((t) => (t.draggable = false));
-      submitBtn.disabled = true;
-    });
-
-    // Hear the words: title A, A words (top->bottom), title B, B words (top->bottom), each twice
-    hearBtn.addEventListener("click", async () => {
-      if (hearBtn.disabled) return;
-      hearBtn.disabled = true;
-
-      const seq = [];
-      const titleAPath = `${paths.audio}/title_a.mp3`;
-      const titleBPath = `${paths.audio}/title_b.mp3`;
-
-      const pushTwice = (obj) => {
-        seq.push({ ...obj });
-        seq.push({ ...obj });
-      };
-
-      // Column A
-      pushTwice({ type: "title", el: colAHeader, path: titleAPath });
-      const colAZones = dropzones.filter((z) => z.dataset.col === "A");
-      for (const z of colAZones) {
-        const tile = z.firstElementChild;
-        if (tile) {
-          const text = tile.textContent;
-          const path = mapWordToAudio.get(text);
-          if (path) pushTwice({ type: "tile", el: tile, path });
-        }
-      }
-
-      // Column B
-      pushTwice({ type: "title", el: colBHeader, path: titleBPath });
-      const colBZones = dropzones.filter((z) => z.dataset.col === "B");
-      for (const z of colBZones) {
-        const tile = z.firstElementChild;
-        if (tile) {
-          const text = tile.textContent;
-          const path = mapWordToAudio.get(text);
-          if (path) pushTwice({ type: "tile", el: tile, path });
-        }
-      }
-
-      // Play sequentially
-      for (const item of seq) {
-        await playOne(item);
-      }
-      hearBtn.disabled = false;
-    });
-
-    function playOne({ type, el, path }) {
-      return new Promise((resolve) => {
-        const audio = new Audio(path);
-        el.classList.add("speaking");
-        audio.play().catch(() => {}); // don't block on audio errors
-        audio.onended = () => {
-          el.classList.remove("speaking");
-          resolve();
-        };
-        audio.onerror = () => {
-          el.classList.remove("speaking");
-          resolve();
-        };
-      });
-    }
-
-    function updateSubmitState() {
-      // Enable submit only when all 10 tiles are placed in the table
-      const placed = dropzones.reduce((acc, z) => acc + (z.firstElementChild ? 1 : 0), 0);
-      submitBtn.disabled = placed !== 10 || submitted;
-    }
-  }
-
-  // Kick off load
-  load().catch((err) => {
-    console.error(err);
-    alert(
-      "Could not load the dataset. Check that:\n" +
-        `• ${paths.csv} exists and has 2 lines\n` +
-        "• Folder/file names match case exactly\n" +
-        "• You’re on the Pages URL (not the raw GitHub domain)"
-    );
   });
-})();
+  return shuffle(tiles);
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/* ---------- RENDERING ---------- */
+function renderTitles(rows) {
+  // Use the first CSV row to title the two categories
+  // If you prefer different titling logic, adjust here.
+  const tA = document.getElementById("titleA");
+  const tB = document.getElementById("titleB");
+  const firstRow = rows[0] || [];
+  tA.textContent = firstRow[0] || "Title A";
+  tB.textContent = firstRow[1] || "Title B";
+}
+
+function renderPool(tiles) {
+  const pool = document.getElementById("pool");
+  pool.innerHTML = "";
+  tiles.forEach(tile => {
+    const el = document.createElement("button");
+    el.className = "tile";
+    el.draggable = true;
+    el.textContent = tile.text;
+    el.dataset.id = tile.id;
+
+    el.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", tile.id);
+      // Fix ghost size in some browsers
+      const rect = el.getBoundingClientRect();
+      el.style.setProperty("--drag-w", rect.width + "px");
+      el.style.setProperty("--drag-h", rect.height + "px");
+      el.classList.add("dragging");
+    });
+    el.addEventListener("dragend", () => el.classList.remove("dragging"));
+
+    pool.appendChild(el);
+  });
+}
+
+function renderGrid(numRows, numCols) {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+
+  // Build rows x cols droppable cells
+  for (let r = 0; r < numRows; r++) {
+    const rowEl = document.createElement("div");
+    rowEl.className = "grid-row";
+    for (let c = 0; c < numCols; c++) {
+      const cell = document.createElement("div");
+      cell.className = "dropcell";
+      cell.dataset.row = String(r);
+      cell.dataset.col = String(c);
+
+      // DnD events
+      cell.addEventListener("dragover", (e) => e.preventDefault());
+      cell.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const id = e.dataTransfer.getData("text/plain");
+        placeTile(id, cell);
+      });
+
+      rowEl.appendChild(cell);
+    }
+    grid.appendChild(rowEl);
+  }
+}
+
+/* ---------- GAME STATE ---------- */
+let ALL_TILES = [];
+let GRID_ROWS = 2;
+let GRID_COLS = 0;
+
+function placeTile(tileId, cell) {
+  const tile = ALL_TILES.find(t => t.id === tileId);
+  if (!tile) return;
+
+  const row = Number(cell.dataset.row);
+  const col = Number(cell.dataset.col);
+
+  // Only allow placing the correct word in its correct row/column
+  const correct = (tile.targetRow === row) && (tile.targetCol === col);
+  if (!correct) {
+    cell.classList.add("shake");
+    setTimeout(() => cell.classList.remove("shake"), 300);
+    return;
+  }
+
+  // If cell already has content, ignore
+  if (cell.childElementCount > 0) return;
+
+  // Move tile into cell
+  const pool = document.getElementById("pool");
+  const btn = pool.querySelector(`[data-id="${tile.id}"]`);
+  if (btn) {
+    btn.draggable = false;
+    btn.classList.add("placed");
+    // Keep its size stable in the grid
+    btn.style.width = "var(--tile-w)";
+    btn.style.minWidth = "var(--tile-w)";
+    btn.style.height = "var(--tile-h)";
+    cell.appendChild(btn);
+  }
+
+  tile.placed = true;
+
+  // Optional: check completion
+  const done = ALL_TILES.every(t => t.placed);
+  if (done) {
+    document.getElementById("status").textContent = "Nice! All done.";
+  }
+}
+
+/* ---------- INIT ---------- */
+async function init() {
+  // Read dataset param: ?dataset=dataset01
+  const params = new URLSearchParams(location.search);
+  const ds = params.get("dataset") || "dataset01";
+  const url = `${ds}.csv`;
+
+  const rows = await loadCSV(url);
+
+  // counts -> table shape
+  GRID_ROWS = countDataItemsPerRow(rows);  // usually 2
+  GRID_COLS = countRows(rows);             // number of pairs
+
+  renderTitles(rows);
+  renderGrid(GRID_ROWS, GRID_COLS);
+
+  ALL_TILES = toTiles(rows);
+  renderPool(ALL_TILES);
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
